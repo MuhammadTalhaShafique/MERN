@@ -2,77 +2,106 @@ pipeline {
     agent any
 
     environment {
-        EC2_HOST = '13.48.163.120' // TODO: Your EC2 public IP
-        EC2_USER = 'ubuntu'        // TODO: Your EC2 username
-        PROJECT_DIR = '/home/ubuntu/your-app-folder' // TODO: Path on EC2
-        // The following assumes your Jenkins node has SSH keys set up for passwordless login to EC2
+        DEPLOY_DIR = "/var/lib/jenkins/DevOps/mern/"
+        REPO_URL = "https://github.com/MuhammadTalhaShafique/MERN.git" // TODO: update this
+        MONGO_URI = "mongodb+srv://dlearner4:0dg7OfME0BtJ8ocV@mongodb.lqu3upd.mongodb.net/?retryWrites=true&w=majority&appName=Mongodb"
+        JWT_SECRET = "Yk1zQk9yVG93UmtzWnZHaUhpNkJKTGcycUZHT0lYMHc"
+        FRONTEND_PORT = "3000"
+        BACKEND_PORT = "5000"
     }
 
     stages {
-        stage('Checkout') {
+        stage('Delete MERN folder if it exists') {
             steps {
-                checkout scm
+                sh '''
+                    if [ -d "${DEPLOY_DIR}" ]; then
+                        find "${DEPLOY_DIR}" -mindepth 1 -delete
+                        echo "Contents of ${DEPLOY_DIR} have been removed."
+                    else
+                        echo "Directory ${DEPLOY_DIR} does not exist."
+                    fi
+                '''
             }
         }
-        stage('Build & Deploy on EC2') {
+        stage('Fetch code') {
             steps {
-                script {
-                    // Copy repo to EC2
-                    sh """
-                      ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} 'rm -rf ${PROJECT_DIR}'
-                      scp -o StrictHostKeyChecking=no -r . ${EC2_USER}@${EC2_HOST}:${PROJECT_DIR}
-                    """
-                    // Build and deploy with Docker Compose on EC2
-                    sh """
-                      ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
-                        cd ${PROJECT_DIR} &&
-                        docker-compose down || true &&
-                        docker-compose up -d --build
-                      '
-                    """
+                sh "git clone ${REPO_URL} ${DEPLOY_DIR}"
+            }
+        }
+        stage('Set .env Files') {
+            steps {
+                // Backend .env
+                sh '''
+                    echo "MONGO_URI=${MONGO_URI}" > ${DEPLOY_DIR}backend/.env
+                    echo "JWT_SECRET=${JWT_SECRET}" >> ${DEPLOY_DIR}backend/.env
+                    echo "PORT=${BACKEND_PORT}" >> ${DEPLOY_DIR}backend/.env
+                '''
+                // Frontend .env
+                sh '''
+                    echo "REACT_APP_API_URL=http://localhost:${BACKEND_PORT}/api" > ${DEPLOY_DIR}frontend/.env
+                '''
+            }
+        }
+        stage('Build and Start Docker Compose') {
+            steps {
+                dir("${DEPLOY_DIR}") {
+                    sh 'docker compose -p mernapp up -d --build'
                 }
             }
         }
-        stage('Run Selenium Tests on EC2') {
+        stage('Wait for Application to Start') {
             steps {
-                script {
-                    // Run selenium tests inside EC2 using Docker (pytest output redirected to results.txt)
-                    sh """
-                      ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
-                        cd ${PROJECT_DIR}/selenium-tests &&
-                        docker build -t selenium-tests . &&
-                        docker run --rm selenium-tests > results.txt || true
-                      '
-                      scp -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST}:${PROJECT_DIR}/selenium-tests/results.txt .
-                    """
+                dir("${DEPLOY_DIR}") {
+                    sh '''
+                        echo "Waiting for MERN app to be ready..."
+                        sleep 30
+                        for i in {1..10}; do
+                            if curl -f http://localhost:${FRONTEND_PORT} > /dev/null 2>&1; then
+                                echo "Frontend is ready!"
+                                break
+                            fi
+                            echo "Waiting for frontend... attempt $i"
+                            sleep 10
+                        done
+                        if curl -f http://localhost:${FRONTEND_PORT} > /dev/null 2>&1; then
+                            echo "✅ Frontend is responding on port ${FRONTEND_PORT}"
+                        else
+                            echo "⚠️  Frontend may not be fully ready"
+                        fi
+                    '''
                 }
             }
         }
-        stage('Email Test Results to Committer') {
+        stage('Build and Run Selenium Tests (Docker)') {
             steps {
-                script {
-                    // Get committer's email from the latest commit
-                    def committerEmail = sh(
-                        script: "git log -1 --pretty=format:'%ae'",
-                        returnStdout: true
-                    ).trim()
-                    def testResults = readFile 'results.txt'
-
-                    emailext (
-                        to: committerEmail,
-                        subject: "Selenium Test Results for your commit",
-                        body: """Hello,
-
-Here are the Selenium test results for your recent commit:
-
-${testResults}
-
-Regards,
-Jenkins CI/CD
-"""
-                    )
+                dir("${DEPLOY_DIR}selenium-tests") {
+                    sh '''
+                        echo "🔧 Building and running Selenium tests in Docker..."
+                        docker build -t selenium-tests .
+                        docker run --rm selenium-tests > results.txt || echo "Selenium tests completed with some failures"
+                    '''
                 }
             }
+        }
+    }
+    post {
+        always {
+            dir("${DEPLOY_DIR}selenium-tests") {
+                sh '''
+                    echo "📊 Docker Compose Status:"
+                    docker compose -p mernapp ps || true
+                    echo "📁 Selenium Test Results:"
+                    cat results.txt || echo "No results.txt found"
+                    echo "📸 Selenium Test Screenshots (if any):"
+                    ls -la /tmp/*.png 2>/dev/null || echo "No screenshots generated"
+                '''
+            }
+        }
+        failure {
+            echo '❌ Pipeline failed! Check the console output for Selenium test details.'
+        }
+        success {
+            echo '✅ Pipeline completed successfully! Selenium tests executed in Docker.'
         }
     }
 }
