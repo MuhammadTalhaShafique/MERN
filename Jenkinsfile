@@ -74,11 +74,11 @@ pipeline {
         }
         stage('Build and Run Selenium Tests (Docker)') {
             steps {
-                dir("${DEPLOY_DIR}selenium-tests") {
+                dir("${DEPLOY_DIR}") {
                     sh '''
-                        echo "🔧 Building and running Selenium tests in Docker..."
-                        docker build -t selenium-tests .
-                        docker run --rm selenium-tests > results.txt || echo "Selenium tests completed with some failures"
+                        echo "🔧 Building and running Selenium tests in Docker Compose..."
+                        docker compose -p mernapp build selenium-tests
+                        docker compose -p mernapp run --rm selenium-tests > selenium-tests/results.txt || echo "Selenium tests completed with some failures"
                     '''
                 }
             }
