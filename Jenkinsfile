@@ -4,7 +4,7 @@ pipeline {
     environment {
         EC2_HOST = '13.48.163.120' // TODO: Your EC2 public IP
         EC2_USER = 'ubuntu'        // TODO: Your EC2 username
-        PROJECT_DIR = '/home/ubuntu/TODO' // TODO: Path on EC2
+        PROJECT_DIR = '/home/ubuntu/your-app-folder' // TODO: Path on EC2
         // The following assumes your Jenkins node has SSH keys set up for passwordless login to EC2
     }
 
@@ -69,7 +69,7 @@ ${testResults}
 
 Regards,
 Jenkins CI/CD
-
+"""
                     )
                 }
             }
