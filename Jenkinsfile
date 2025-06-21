@@ -99,7 +99,7 @@ pipeline {
             echo '❌ Pipeline failed! Check the console output for Selenium test details.'
         }
         success {
-            echo '✅ Pipeline completed successfully! Selenium tests executed in Docker.'
+            echo '✅ Pipeline completed successfully!'
         }
     }
 }
